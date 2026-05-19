@@ -330,23 +330,6 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 🛣️ Roadmap
-
-- [ ] Web UI (React/Vue.js)
-- [ ] Group chats with multi-party E2EE
-- [ ] File sharing (encrypted)
-- [ ] Voice/Video calls
-- [ ] Message reactions beyond hearts
-- [ ] Read receipts
-- [ ] User profiles and avatars
-- [ ] Push notifications
-- [ ] Cloud backup (encrypted)
-- [ ] Mobile apps (iOS/Android)
-- [ ] Message search
-- [ ] Custom emoji reactions
-
----
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please:
