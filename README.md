@@ -1,9 +1,12 @@
 <div align="center">
-  <h1>🔒 poCHATo</h1>
+  <img src="https://minecraft.wiki/images/Potato_JE3_BE2.png" alt="poCHATo Logo" width="150"/>
+
+  # poCHATo
   
   **A secure, real-time, end-to-end encrypted client-server chat application written in Go.**
 
-  [![Go Version](https://img.shields.io/badge/Go-1.24.2-00ADD8?style=flat&logo=go)](https://golang.org/)
+  [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
+  [![Gin Framework](https://img.shields.io/badge/Gin-Web_Framework-0088CC?style=flat)](https://gin-gonic.com/)
   [![WebSockets](https://img.shields.io/badge/WebSockets-Real_Time-blue?style=flat)](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -359,18 +362,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 Authors
 
-**Signal Mesh Team**
+**Mateusz Słotwiński**
+**Łukasz Przeszłowski**
 
 For questions or support, please open an issue on GitHub.
 
 ---
 
-## 🔗 Links
+## 🔗 Sources
 
-- **Repository:** https://github.com/yourusername/poCHATo
+- **Repository:** https://github.com/mslotwinski-dev/poCHATo
 - **Go Documentation:** https://golang.org/
 - **Gorilla WebSocket:** https://github.com/gorilla/websocket
 - **SQLite:** https://sqlite.org/
+- **Adam Woodbeck - Network Programming with Go:** https://github.com/irezaul/go-life/tree/main/books
 
 ---
 
