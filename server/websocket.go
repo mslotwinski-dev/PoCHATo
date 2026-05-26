@@ -152,8 +152,8 @@ func (c *Client) WritePump() {
 				return
 			}
 
-		default:
-			// Continue if send channel is empty
+		case <-time.After(100 * time.Millisecond):
+			// Prevent busy-waiting when send channel is empty
 		}
 	}
 }
