@@ -153,6 +153,28 @@ func (ac *APIClient) GetFriendRequests() ([]FriendRequest, error) {
 	return requests, nil
 }
 
+// GetSentFriendRequests retrieves pending requests sent by the current user.
+func (ac *APIClient) GetSentFriendRequests() ([]FriendRequest, error) {
+	var requests []FriendRequest
+
+	req, _ := http.NewRequest("GET", ac.baseURL+"/api/friends/sent", nil)
+	req.Header.Set("Authorization", ac.token)
+
+	resp, err := ac.client.Do(req)
+	if err != nil {
+		return requests, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return requests, fmt.Errorf("failed to get sent friend requests: %s", string(bodyBytes))
+	}
+
+	json.NewDecoder(resp.Body).Decode(&requests)
+	return requests, nil
+}
+
 // AcceptFriendRequest accepts a friend request and provides our public key
 func (ac *APIClient) AcceptFriendRequest(requestID, publicKey string) error {
 	payload := map[string]string{"request_id": requestID, "public_key": publicKey}
@@ -171,6 +193,29 @@ func (ac *APIClient) AcceptFriendRequest(requestID, publicKey string) error {
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("failed to accept friend request: %s", string(bodyBytes))
+	}
+
+	return nil
+}
+
+// RejectFriendRequest rejects a friend request.
+func (ac *APIClient) RejectFriendRequest(requestID string) error {
+	payload := map[string]string{"request_id": requestID}
+	body, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest("POST", ac.baseURL+"/api/friends/reject", bytes.NewBuffer(body))
+	req.Header.Set("Authorization", ac.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := ac.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to reject friend request: %s", string(bodyBytes))
 	}
 
 	return nil
@@ -263,7 +308,8 @@ func (ac *APIClient) BlockUser(blockedUserID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to block user")
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to block user: %s", string(bodyBytes))
 	}
 
 	return nil
@@ -285,7 +331,8 @@ func (ac *APIClient) UnblockUser(blockedUserID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to unblock user")
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to unblock user: %s", string(bodyBytes))
 	}
 
 	return nil

@@ -210,7 +210,7 @@ func CreateFriendRequest(senderID, receiverID, senderPublicKey string) error {
 
 func GetFriendRequestsPending(userID string) ([]FriendRequest, error) {
 	rows, err := db.Query(
-		"SELECT fr.id, fr.sender_id, COALESCE(fr.sender_public_key, ''), COALESCE(u.username, ''), fr.receiver_id, fr.status, fr.created_at, fr.updated_at FROM friend_requests fr LEFT JOIN users u ON fr.sender_id = u.id WHERE fr.receiver_id = ? AND fr.status = 'pending'",
+		"SELECT fr.id, fr.sender_id, COALESCE(fr.sender_public_key, ''), COALESCE(sender.username, ''), fr.receiver_id, COALESCE(receiver.username, ''), fr.status, fr.created_at, fr.updated_at FROM friend_requests fr LEFT JOIN users sender ON fr.sender_id = sender.id LEFT JOIN users receiver ON fr.receiver_id = receiver.id WHERE fr.receiver_id = ? AND fr.status = 'pending'",
 		userID,
 	)
 	if err != nil {
@@ -221,7 +221,7 @@ func GetFriendRequestsPending(userID string) ([]FriendRequest, error) {
 	var requests []FriendRequest
 	for rows.Next() {
 		var req FriendRequest
-		if err := rows.Scan(&req.ID, &req.SenderID, &req.SenderPublicKey, &req.SenderUsername, &req.ReceiverID, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
+		if err := rows.Scan(&req.ID, &req.SenderID, &req.SenderPublicKey, &req.SenderUsername, &req.ReceiverID, &req.ReceiverUsername, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, req)
@@ -280,13 +280,54 @@ func AcceptFriendRequest(requestID, senderID, receiverID, receiverPublicKey stri
 	return tx.Commit()
 }
 
-func RejectFriendRequest(requestID string) error {
+func GetSentFriendRequests(userID string) ([]FriendRequest, error) {
+	rows, err := db.Query(
+		"SELECT fr.id, fr.sender_id, COALESCE(fr.sender_public_key, ''), COALESCE(sender.username, ''), fr.receiver_id, COALESCE(receiver.username, ''), fr.status, fr.created_at, fr.updated_at FROM friend_requests fr LEFT JOIN users sender ON fr.sender_id = sender.id LEFT JOIN users receiver ON fr.receiver_id = receiver.id WHERE fr.sender_id = ? AND fr.status = 'pending'",
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var requests []FriendRequest
+	for rows.Next() {
+		var req FriendRequest
+		if err := rows.Scan(&req.ID, &req.SenderID, &req.SenderPublicKey, &req.SenderUsername, &req.ReceiverID, &req.ReceiverUsername, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
+			return nil, err
+		}
+		requests = append(requests, req)
+	}
+
+	return requests, rows.Err()
+}
+
+func RejectFriendRequest(requestID, blockerID, blockedUserID string) error {
 	now := time.Now()
-	_, err := db.Exec(
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(
 		"UPDATE friend_requests SET status = 'rejected', updated_at = ? WHERE id = ?",
 		now, requestID,
 	)
-	return err
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	_, err = tx.Exec(
+		"INSERT OR IGNORE INTO blocked_users (id, user_id, blocked_user_id, created_at) VALUES (?, ?, ?, ?)",
+		uuid.New().String(), blockerID, blockedUserID, now,
+	)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // Message operations

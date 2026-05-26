@@ -24,14 +24,15 @@ type Friend struct {
 
 // FriendRequest represents a friend request
 type FriendRequest struct {
-	ID              string    `json:"id"`
-	SenderID        string    `json:"sender_id"`
-	SenderPublicKey string    `json:"sender_public_key"`
-	SenderUsername  string    `json:"sender_username"`
-	ReceiverID      string    `json:"receiver_id"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	SenderID         string    `json:"sender_id"`
+	SenderPublicKey  string    `json:"sender_public_key"`
+	SenderUsername   string    `json:"sender_username"`
+	ReceiverID       string    `json:"receiver_id"`
+	ReceiverUsername string    `json:"receiver_username"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // Message represents a chat message

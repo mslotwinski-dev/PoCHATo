@@ -167,6 +167,16 @@ func AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	blocked, err := IsUserBlocked(friend.ID, userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if blocked {
+		http.Error(w, "You are blocked by this user", http.StatusForbidden)
+		return
+	}
+
 	err = CreateFriendRequest(userID, friend.ID, req.PublicKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -175,6 +185,17 @@ func AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "friend request sent"})
+
+	if clientManager != nil {
+		notif := WSMessage{
+			Type:       "friend_request",
+			SenderID:   userID,
+			ReceiverID: friend.ID,
+			CreatedAt:  time.Now(),
+		}
+		clientManager.SendToClient(friend.ID, notif)
+		clientManager.SendToClient(userID, WSMessage{Type: "friend_request_sent", SenderID: userID, ReceiverID: friend.ID, CreatedAt: time.Now()})
+	}
 }
 
 // GetFriendRequestsHandler retrieves pending friend requests
@@ -256,6 +277,76 @@ func AcceptFriendHandler(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:  time.Now(),
 		}
 		clientManager.SendToClient(senderID, notif)
+	}
+}
+
+// GetSentFriendRequestsHandler retrieves outgoing friend requests.
+func GetSentFriendRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := getUserFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	requests, err := GetSentFriendRequests(userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(requests)
+}
+
+// RejectFriendHandler rejects a friend request and blocks the sender.
+func RejectFriendHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := getUserFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	requests, _ := GetFriendRequestsPending(userID)
+	var senderID string
+	for _, fr := range requests {
+		if fr.ID == req.RequestID {
+			senderID = fr.SenderID
+			break
+		}
+	}
+	if senderID == "" {
+		http.Error(w, "Request not found", http.StatusNotFound)
+		return
+	}
+
+	if err := RejectFriendRequest(req.RequestID, userID, senderID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "friend request rejected"})
+
+	if clientManager != nil {
+		clientManager.SendToClient(senderID, WSMessage{Type: "friend_request_rejected", SenderID: userID, ReceiverID: senderID, CreatedAt: time.Now()})
 	}
 }
 

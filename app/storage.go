@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // LocalStorage handles local data persistence
@@ -26,6 +27,20 @@ func NewLocalStorage(dataDir string) (*LocalStorage, error) {
 	return ls, nil
 }
 
+func (ls *LocalStorage) keyFilePath(userID string) string {
+	return filepath.Join(ls.dataDir, "keys", sanitizeFilePart(userID)+".json")
+}
+
+func (ls *LocalStorage) friendKeysFilePath(userID string) string {
+	return filepath.Join(ls.dataDir, "friend_keys", sanitizeFilePart(userID)+".json")
+}
+
+func sanitizeFilePart(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, string(os.PathSeparator), "_")
+	return value
+}
+
 // SaveKeys saves user's key pair
 func (ls *LocalStorage) SaveKeys(userID string, publicKey, privateKey string) error {
 	keysData := map[string]string{
@@ -39,22 +54,32 @@ func (ls *LocalStorage) SaveKeys(userID string, publicKey, privateKey string) er
 		return err
 	}
 
-	keyFilePath := filepath.Join(ls.dataDir, "keys.json")
+	keyFilePath := ls.keyFilePath(userID)
+	if err := os.MkdirAll(filepath.Dir(keyFilePath), 0700); err != nil {
+		return err
+	}
 	return os.WriteFile(keyFilePath, data, 0600)
 }
 
 // LoadKeys loads user's key pair
-func (ls *LocalStorage) LoadKeys() (LocalKeys, error) {
-	keyFilePath := filepath.Join(ls.dataDir, "keys.json")
+func (ls *LocalStorage) LoadKeys(userID string) (LocalKeys, error) {
+	keyFilePath := ls.keyFilePath(userID)
 
 	data, err := os.ReadFile(keyFilePath)
 	if err != nil {
-		return LocalKeys{}, err
+		legacyPath := filepath.Join(ls.dataDir, "keys.json")
+		data, err = os.ReadFile(legacyPath)
+		if err != nil {
+			return LocalKeys{}, err
+		}
 	}
 
 	var keysData map[string]string
 	if err := json.Unmarshal(data, &keysData); err != nil {
 		return LocalKeys{}, err
+	}
+	if userID != "" && keysData["user_id"] != "" && keysData["user_id"] != userID {
+		return LocalKeys{}, fmt.Errorf("stored keys belong to another account")
 	}
 
 	return LocalKeys{
@@ -132,8 +157,11 @@ func (ls *LocalStorage) ClearSession() error {
 }
 
 // SaveFriendPublicKey saves a friend's public key
-func (ls *LocalStorage) SaveFriendPublicKey(friendID, publicKey string) error {
-	friendKeysPath := filepath.Join(ls.dataDir, "friend_keys.json")
+func (ls *LocalStorage) SaveFriendPublicKey(userID, friendID, publicKey string) error {
+	friendKeysPath := ls.friendKeysFilePath(userID)
+	if err := os.MkdirAll(filepath.Dir(friendKeysPath), 0700); err != nil {
+		return err
+	}
 
 	var friendKeys map[string]string
 
@@ -157,8 +185,8 @@ func (ls *LocalStorage) SaveFriendPublicKey(friendID, publicKey string) error {
 }
 
 // GetFriendPublicKey retrieves a friend's public key
-func (ls *LocalStorage) GetFriendPublicKey(friendID string) (string, error) {
-	friendKeysPath := filepath.Join(ls.dataDir, "friend_keys.json")
+func (ls *LocalStorage) GetFriendPublicKey(userID, friendID string) (string, error) {
+	friendKeysPath := ls.friendKeysFilePath(userID)
 
 	data, err := os.ReadFile(friendKeysPath)
 	if err != nil {
@@ -179,8 +207,8 @@ func (ls *LocalStorage) GetFriendPublicKey(friendID string) (string, error) {
 }
 
 // LoadAllFriendKeys loads all friend public keys
-func (ls *LocalStorage) LoadAllFriendKeys() (map[string]string, error) {
-	friendKeysPath := filepath.Join(ls.dataDir, "friend_keys.json")
+func (ls *LocalStorage) LoadAllFriendKeys(userID string) (map[string]string, error) {
+	friendKeysPath := ls.friendKeysFilePath(userID)
 
 	data, err := os.ReadFile(friendKeysPath)
 	if err != nil {

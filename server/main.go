@@ -42,7 +42,9 @@ func registerRoutes() {
 	// Friend routes
 	http.HandleFunc("/api/friends/add", AddFriendHandler)
 	http.HandleFunc("/api/friends/requests", GetFriendRequestsHandler)
+	http.HandleFunc("/api/friends/sent", GetSentFriendRequestsHandler)
 	http.HandleFunc("/api/friends/accept", AcceptFriendHandler)
+	http.HandleFunc("/api/friends/reject", RejectFriendHandler)
 	http.HandleFunc("/api/friends/list", GetFriendsHandler)
 	http.HandleFunc("/api/friends/key", UpdatePublicKeyHandler)
 	http.HandleFunc("/api/friends/history", GetMessageHistoryHandler)

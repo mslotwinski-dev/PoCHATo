@@ -23,26 +23,29 @@ type desktopUI struct {
 	app fyne.App
 	win fyne.Window
 
-	statusLabel      *widget.Label
-	userLabel        *widget.Label
-	friendHeader     *widget.Label
-	messageHeader    *widget.Label
-	messageEntry     *widget.Entry
-	serverURLEntry   *widget.Entry
-	newFriendEntry   *widget.Entry
-	requestStatus    *widget.Label
-	selectedFriend   *Friend
-	selectedRequest  int
-	friends          []Friend
-	requests         []FriendRequest
-	blocked          []BlockedUser
-	messages         []ChatMessage
-	friendList       *widget.List
-	requestList      *widget.List
-	blockedList      *widget.List
-	messageList      *widget.List
-	messageMu        sync.Mutex
-	activeChatCancel func()
+	statusLabel            *widget.Label
+	userLabel              *widget.Label
+	friendHeader           *widget.Label
+	messageHeader          *widget.Label
+	messageEntry           *widget.Entry
+	serverURLEntry         *widget.Entry
+	newFriendEntry         *widget.Entry
+	requestStatus          *widget.Label
+	selectedFriend         *Friend
+	selectedRequest        int
+	friends                []Friend
+	requests               []FriendRequest
+	sentRequests           []FriendRequest
+	blocked                []BlockedUser
+	messages               []ChatMessage
+	friendList             *widget.List
+	requestList            *widget.List
+	sentRequestList        *widget.List
+	blockedList            *widget.List
+	messageList            *widget.List
+	messageMu              sync.Mutex
+	activeChatCancel       func()
+	eventHandlerRegistered bool
 }
 
 func main() {
@@ -160,13 +163,15 @@ func (ui *desktopUI) showMainScreen() {
 		ui.sendMessage(false)
 	}
 
-	// Register for background friend events to refresh UI
-	ui.svc.RegisterEventHandler(func() {
-		ui.runOnMain(func() {
-			ui.refreshFriends()
-			ui.refreshRequests()
+	if !ui.eventHandlerRegistered {
+		// Register for background friend events to refresh UI
+		ui.svc.RegisterEventHandler(func() {
+			ui.runOnMain(func() {
+				ui.refreshAll()
+			})
 		})
-	})
+		ui.eventHandlerRegistered = true
+	}
 
 	ui.newFriendEntry = widget.NewEntry()
 	ui.newFriendEntry.SetPlaceHolder("Friend username")
@@ -219,11 +224,27 @@ func (ui *desktopUI) showMainScreen() {
 		}
 	}
 
+	ui.sentRequestList = widget.NewList(
+		func() int { return len(ui.sentRequests) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
+		func(id widget.ListItemID, object fyne.CanvasObject) {
+			label := object.(*widget.Label)
+			if id >= 0 && id < len(ui.sentRequests) {
+				username := ui.sentRequests[id].ReceiverUsername
+				if username != "" {
+					label.SetText(fmt.Sprintf("To %s", username))
+				} else {
+					label.SetText(fmt.Sprintf("To %s", ui.shortID(ui.sentRequests[id].ReceiverID)))
+				}
+			}
+		},
+	)
+
 	acceptRequest := widget.NewButtonWithIcon("Accept", theme.ContentAddIcon(), func() {
 		ui.acceptSelectedRequest()
 	})
-	refreshRequests := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
-		ui.refreshRequests()
+	rejectRequest := widget.NewButtonWithIcon("Reject", theme.DeleteIcon(), func() {
+		ui.rejectSelectedRequest()
 	})
 
 	ui.blockedList = widget.NewList(
@@ -249,7 +270,7 @@ func (ui *desktopUI) showMainScreen() {
 			}
 			ui.runOnMain(func() {
 				ui.newFriendEntry.SetText("")
-				ui.refreshRequests()
+				ui.refreshSentRequests()
 			})
 		})
 	})
@@ -266,11 +287,17 @@ func (ui *desktopUI) showMainScreen() {
 	)
 
 	requestPanel := container.NewBorder(
-		container.NewVBox(widget.NewLabelWithStyle("Requests", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), ui.requestStatus, container.NewHBox(acceptRequest, refreshRequests)),
+		container.NewVBox(
+			widget.NewLabelWithStyle("Incoming Requests", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			ui.requestStatus,
+			container.NewHBox(acceptRequest, rejectRequest),
+			widget.NewSeparator(),
+			widget.NewLabelWithStyle("Sent Requests", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		),
 		nil,
 		nil,
 		nil,
-		ui.requestList,
+		container.NewVBox(ui.requestList, ui.sentRequestList),
 	)
 
 	blockedPanel := container.NewBorder(
@@ -304,7 +331,11 @@ func (ui *desktopUI) showMainScreen() {
 			body := card.Objects[1].(*widget.Label)
 			message := ui.messages[id]
 			if message.Incoming {
-				title.SetText(fmt.Sprintf("%s · %s", ui.shortID(message.SenderID), message.CreatedAt.Format(time.Kitchen)))
+				friendName := ui.shortID(message.SenderID)
+				if ui.selectedFriend != nil && ui.selectedFriend.FriendUserID == message.SenderID && ui.selectedFriend.FriendUsername != "" {
+					friendName = ui.selectedFriend.FriendUsername
+				}
+				title.SetText(fmt.Sprintf("%s · %s", friendName, message.CreatedAt.Format(time.Kitchen)))
 			} else {
 				title.SetText(fmt.Sprintf("You · %s", message.CreatedAt.Format(time.Kitchen)))
 			}
@@ -357,6 +388,7 @@ func (ui *desktopUI) refreshAll() {
 	ui.refreshUserBadge()
 	ui.refreshFriends()
 	ui.refreshRequests()
+	ui.refreshSentRequests()
 	ui.refreshBlocked()
 }
 
@@ -394,6 +426,20 @@ func (ui *desktopUI) refreshRequests() {
 			ui.selectedRequest = -1
 			ui.requestStatus.SetText("")
 			ui.requestList.Refresh()
+		})
+	})
+}
+
+func (ui *desktopUI) refreshSentRequests() {
+	ui.runAsync(func() {
+		sent, err := ui.svc.SentFriendRequests()
+		if err != nil {
+			ui.showError(err)
+			return
+		}
+		ui.runOnMain(func() {
+			ui.sentRequests = sent
+			ui.sentRequestList.Refresh()
 		})
 	})
 }
@@ -458,9 +504,8 @@ func (ui *desktopUI) openFriend(friend Friend) {
 				text := state
 				ui.runOnMain(func() {
 					if strings.HasPrefix(text, "refresh:") {
-						// refresh friends/requests when server signals updates
-						ui.refreshFriends()
-						ui.refreshRequests()
+						// refresh all lists when server signals updates
+						ui.refreshAll()
 						return
 					}
 					ui.statusLabel.SetText(text)
@@ -518,9 +563,23 @@ func (ui *desktopUI) acceptSelectedRequest() {
 			return
 		}
 		ui.runOnMain(func() {
-			ui.refreshRequests()
-			ui.refreshFriends()
-			ui.refreshBlocked()
+			ui.refreshAll()
+		})
+	})
+}
+
+func (ui *desktopUI) rejectSelectedRequest() {
+	if ui.selectedRequest < 0 || ui.selectedRequest >= len(ui.requests) {
+		return
+	}
+	request := ui.requests[ui.selectedRequest]
+	ui.runAsync(func() {
+		if err := ui.svc.RejectFriendRequest(request); err != nil {
+			ui.showError(err)
+			return
+		}
+		ui.runOnMain(func() {
+			ui.refreshAll()
 		})
 	})
 }

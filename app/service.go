@@ -150,6 +150,7 @@ func (s *Service) Login(username, password string) (User, error) {
 // Logout clears the local session and stops any active chat connection.
 func (s *Service) Logout() error {
 	s.StopChat()
+	s.stopEventListener()
 	if err := s.storage.ClearSession(); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -185,6 +186,7 @@ func (s *Service) AddFriend(username string) error {
 func (s *Service) AcceptFriendRequest(request FriendRequest) error {
 	s.mu.RLock()
 	myPublicKey := s.localKeys.PublicKey
+	myUserID := s.currentUser.ID
 	s.mu.RUnlock()
 
 	if err := s.api.AcceptFriendRequest(request.ID, myPublicKey); err != nil {
@@ -200,7 +202,7 @@ func (s *Service) AcceptFriendRequest(request FriendRequest) error {
 	// Find and save the new friend's public key
 	for _, friend := range friends {
 		if friend.FriendUserID == request.SenderID && friend.PublicKey != "" {
-			return s.storage.SaveFriendPublicKey(request.SenderID, friend.PublicKey)
+			return s.storage.SaveFriendPublicKey(myUserID, request.SenderID, friend.PublicKey)
 		}
 	}
 
@@ -210,6 +212,11 @@ func (s *Service) AcceptFriendRequest(request FriendRequest) error {
 // BlockedUsers returns the local block list.
 func (s *Service) BlockedUsers() ([]BlockedUser, error) {
 	return s.api.GetBlockedUsers()
+}
+
+// SentFriendRequests returns the user's outgoing pending requests.
+func (s *Service) SentFriendRequests() ([]FriendRequest, error) {
+	return s.api.GetSentFriendRequests()
 }
 
 // LoadHistory returns decrypted chat history for a friend.
@@ -246,28 +253,42 @@ func (s *Service) LoadHistory(friend Friend, limit int) ([]ChatMessage, error) {
 	return history, nil
 }
 
+// RejectFriendRequest rejects a request.
+func (s *Service) RejectFriendRequest(request FriendRequest) error {
+	return s.api.RejectFriendRequest(request.ID)
+}
+
+// BlockUser blocks a user.
+func (s *Service) BlockUser(blockedUserID string) error {
+	return s.api.BlockUser(blockedUserID)
+}
+
 // StartChat connects to the websocket and streams decrypted messages.
 func (s *Service) StartChat(friend Friend) (<-chan ChatMessage, <-chan string, error) {
 	s.StopChat()
 
-	// If public key is missing, try to fetch fresh friend data from API
+	s.mu.RLock()
+	currentUserID := s.currentUser.ID
+	privateKey := s.localKeys.PrivateKey
+	token := s.api.token
+	serverURL := s.config.ServerURL
+	s.mu.RUnlock()
+
+	// If public key is missing, try to fetch fresh friend data from API.
 	if strings.TrimSpace(friend.PublicKey) == "" {
 		updatedFriends, err := s.api.GetFriends()
 		if err == nil {
 			for _, f := range updatedFriends {
 				if f.FriendUserID == friend.FriendUserID && f.PublicKey != "" {
 					friend.PublicKey = f.PublicKey
+					if currentUserID != "" {
+						_ = s.storage.SaveFriendPublicKey(currentUserID, friend.FriendUserID, friend.PublicKey)
+					}
 					break
 				}
 			}
 		}
 	}
-
-	s.mu.RLock()
-	privateKey := s.localKeys.PrivateKey
-	token := s.api.token
-	serverURL := s.config.ServerURL
-	s.mu.RUnlock()
 
 	if strings.TrimSpace(privateKey) == "" {
 		return nil, nil, fmt.Errorf("local keys are missing")
@@ -319,13 +340,14 @@ func (s *Service) SendMessage(content string, isHeart bool) error {
 	friend := s.activeFriend
 	wsClient := s.wsClient
 	localKeys := s.localKeys
+	currentUserID := s.currentUser.ID
 	s.mu.RUnlock()
 
 	if wsClient == nil || !wsClient.IsConnected() {
 		return fmt.Errorf("chat is not connected")
 	}
 
-	// If public key is missing, try to fetch fresh friend data
+	// If public key is missing, try to fetch fresh friend data.
 	publicKey := friend.PublicKey
 	if strings.TrimSpace(publicKey) == "" {
 		updatedFriends, err := s.api.GetFriends()
@@ -333,6 +355,9 @@ func (s *Service) SendMessage(content string, isHeart bool) error {
 			for _, f := range updatedFriends {
 				if f.FriendUserID == friend.FriendUserID && f.PublicKey != "" {
 					publicKey = f.PublicKey
+					if currentUserID != "" {
+						_ = s.storage.SaveFriendPublicKey(currentUserID, friend.FriendUserID, publicKey)
+					}
 					break
 				}
 			}
@@ -368,7 +393,7 @@ func (s *Service) resumeSession() (bool, error) {
 		return false, nil
 	}
 
-	keys, err := s.storage.LoadKeys()
+	keys, err := s.storage.LoadKeys(user.ID)
 	if err != nil || keys.UserID == "" {
 		if err := s.ensureLocalKeys(user.ID, false); err != nil {
 			return false, err
@@ -412,6 +437,12 @@ func (s *Service) startEventListener() {
 		return
 	}
 	s.eventMu.Unlock()
+	defer func() {
+		s.eventMu.Lock()
+		s.eventClient = nil
+		s.eventCancel = nil
+		s.eventMu.Unlock()
+	}()
 
 	s.mu.RLock()
 	token := s.api.token
@@ -453,7 +484,7 @@ func (s *Service) startEventListener() {
 				ws.Disconnect()
 				return
 			case msg := <-receive:
-				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_key_updated" {
+				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_request_sent" || msg.Type == "friend_request_rejected" || msg.Type == "friend_key_updated" {
 					s.callEventHandlers()
 				}
 			}
@@ -479,7 +510,7 @@ func (s *Service) stopEventListener() {
 
 func (s *Service) ensureLocalKeys(userID string, forceGenerate bool) error {
 	if !forceGenerate {
-		if keys, err := s.storage.LoadKeys(); err == nil && keys.UserID != "" {
+		if keys, err := s.storage.LoadKeys(userID); err == nil && keys.UserID != "" {
 			s.mu.Lock()
 			s.localKeys = keys
 			s.mu.Unlock()
@@ -548,9 +579,9 @@ func (s *Service) chatLoop(ctx context.Context, serverURL, token string, friend 
 				}
 			case msg := <-receive:
 				// Handle friend-related events regardless of current active friend
-				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_key_updated" {
+				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_request_sent" || msg.Type == "friend_request_rejected" || msg.Type == "friend_key_updated" {
 					// Ask UI to refresh lists
-					signalStatus(status, "refresh:friends")
+					signalStatus(status, "refresh:lists")
 					continue
 				}
 
