@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -152,7 +153,8 @@ func AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username string `json:"username"`
+		Username  string `json:"username"`
+		PublicKey string `json:"public_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -165,7 +167,7 @@ func AddFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = CreateFriendRequest(userID, friend.ID)
+	err = CreateFriendRequest(userID, friend.ID, req.PublicKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -213,6 +215,7 @@ func AcceptFriendHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		RequestID string `json:"request_id"`
+		PublicKey string `json:"public_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -234,7 +237,7 @@ func AcceptFriendHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = AcceptFriendRequest(req.RequestID, senderID, userID)
+	err = AcceptFriendRequest(req.RequestID, senderID, userID, req.PublicKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -242,6 +245,18 @@ func AcceptFriendHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "friend request accepted"})
+
+	// Notify the original sender in real-time that their request was accepted
+	if clientManager != nil {
+		notif := WSMessage{
+			Type:       "friend_accepted",
+			SenderID:   userID,
+			ReceiverID: senderID,
+			Content:    "",
+			CreatedAt:  time.Now(),
+		}
+		clientManager.SendToClient(senderID, notif)
+	}
 }
 
 // GetFriendsHandler retrieves user's friend list
@@ -259,7 +274,10 @@ func GetFriendsHandler(w http.ResponseWriter, r *http.Request) {
 
 	friends, err := GetFriendsForUser(userID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("GetFriendsHandler error for user %s: %v", userID, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -286,6 +304,8 @@ func UpdatePublicKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// userID is the sender of this key, req.FriendID is the receiver
+	// The friend needs to store our public key to encrypt messages for us
 	err = UpdateFriendPublicKey(userID, req.FriendID, req.PublicKey)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

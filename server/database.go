@@ -37,6 +37,7 @@ func createTables() error {
 	CREATE TABLE IF NOT EXISTS friend_requests (
 		id TEXT PRIMARY KEY,
 		sender_id TEXT NOT NULL,
+		sender_public_key TEXT,
 		receiver_id TEXT NOT NULL,
 		status TEXT DEFAULT 'pending',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -147,16 +148,16 @@ func CreateFriend(userID, friendUserID, publicKey string) error {
 func GetFriend(userID, friendUserID string) (Friend, error) {
 	var friend Friend
 	err := db.QueryRow(
-		"SELECT id, user_id, friend_user_id, public_key, created_at FROM friends WHERE user_id = ? AND friend_user_id = ?",
+		"SELECT f.id, f.user_id, f.friend_user_id, COALESCE(u.username, ''), COALESCE(f.public_key, ''), f.created_at FROM friends f LEFT JOIN users u ON f.friend_user_id = u.id WHERE f.user_id = ? AND f.friend_user_id = ?",
 		userID, friendUserID,
-	).Scan(&friend.ID, &friend.UserID, &friend.FriendUserID, &friend.PublicKey, &friend.CreatedAt)
+	).Scan(&friend.ID, &friend.UserID, &friend.FriendUserID, &friend.FriendUsername, &friend.PublicKey, &friend.CreatedAt)
 
 	return friend, err
 }
 
 func GetFriendsForUser(userID string) ([]Friend, error) {
 	rows, err := db.Query(
-		"SELECT id, user_id, friend_user_id, public_key, created_at FROM friends WHERE user_id = ?",
+		"SELECT f.id, f.user_id, f.friend_user_id, COALESCE(u.username, ''), COALESCE(f.public_key, ''), f.created_at FROM friends f LEFT JOIN users u ON f.friend_user_id = u.id WHERE f.user_id = ?",
 		userID,
 	)
 	if err != nil {
@@ -167,7 +168,7 @@ func GetFriendsForUser(userID string) ([]Friend, error) {
 	var friends []Friend
 	for rows.Next() {
 		var f Friend
-		if err := rows.Scan(&f.ID, &f.UserID, &f.FriendUserID, &f.PublicKey, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.UserID, &f.FriendUserID, &f.FriendUsername, &f.PublicKey, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		friends = append(friends, f)
@@ -176,29 +177,40 @@ func GetFriendsForUser(userID string) ([]Friend, error) {
 	return friends, rows.Err()
 }
 
-func UpdateFriendPublicKey(userID, friendUserID, publicKey string) error {
-	_, err := db.Exec(
+func UpdateFriendPublicKey(senderID, receiverID, publicKey string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	// When sender sends their public key to receiver, receiver needs it to encrypt messages
+	// So: receiver's entry (receiverID -> senderID) should store senderID's public key
+	_, err = tx.Exec(
 		"UPDATE friends SET public_key = ? WHERE user_id = ? AND friend_user_id = ?",
-		publicKey, userID, friendUserID,
+		publicKey, receiverID, senderID,
 	)
-	return err
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // Friend request operations
-func CreateFriendRequest(senderID, receiverID string) error {
+func CreateFriendRequest(senderID, receiverID, senderPublicKey string) error {
 	id := uuid.New().String()
 	now := time.Now()
 
 	_, err := db.Exec(
-		"INSERT INTO friend_requests (id, sender_id, receiver_id, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)",
-		id, senderID, receiverID, now, now,
+		"INSERT INTO friend_requests (id, sender_id, sender_public_key, receiver_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+		id, senderID, senderPublicKey, receiverID, now, now,
 	)
 	return err
 }
 
 func GetFriendRequestsPending(userID string) ([]FriendRequest, error) {
 	rows, err := db.Query(
-		"SELECT id, sender_id, receiver_id, status, created_at, updated_at FROM friend_requests WHERE receiver_id = ? AND status = 'pending'",
+		"SELECT fr.id, fr.sender_id, COALESCE(fr.sender_public_key, ''), COALESCE(u.username, ''), fr.receiver_id, fr.status, fr.created_at, fr.updated_at FROM friend_requests fr LEFT JOIN users u ON fr.sender_id = u.id WHERE fr.receiver_id = ? AND fr.status = 'pending'",
 		userID,
 	)
 	if err != nil {
@@ -209,7 +221,7 @@ func GetFriendRequestsPending(userID string) ([]FriendRequest, error) {
 	var requests []FriendRequest
 	for rows.Next() {
 		var req FriendRequest
-		if err := rows.Scan(&req.ID, &req.SenderID, &req.ReceiverID, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
+		if err := rows.Scan(&req.ID, &req.SenderID, &req.SenderPublicKey, &req.SenderUsername, &req.ReceiverID, &req.Status, &req.CreatedAt, &req.UpdatedAt); err != nil {
 			return nil, err
 		}
 		requests = append(requests, req)
@@ -218,8 +230,15 @@ func GetFriendRequestsPending(userID string) ([]FriendRequest, error) {
 	return requests, rows.Err()
 }
 
-func AcceptFriendRequest(requestID, senderID, receiverID string) error {
+func AcceptFriendRequest(requestID, senderID, receiverID, receiverPublicKey string) error {
 	now := time.Now()
+
+	// Read sender's public key from the friend request
+	var senderPublicKey string
+	err := db.QueryRow("SELECT COALESCE(sender_public_key, '') FROM friend_requests WHERE id = ?", requestID).Scan(&senderPublicKey)
+	if err != nil {
+		return err
+	}
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -236,13 +255,13 @@ func AcceptFriendRequest(requestID, senderID, receiverID string) error {
 		return err
 	}
 
-	// Create bidirectional friend relationship
+	// Create bidirectional friend relationship with public keys
 	id1 := uuid.New().String()
 	id2 := uuid.New().String()
 
 	_, err = tx.Exec(
-		"INSERT INTO friends (id, user_id, friend_user_id, created_at) VALUES (?, ?, ?, ?)",
-		id1, receiverID, senderID, now,
+		"INSERT INTO friends (id, user_id, friend_user_id, public_key, created_at) VALUES (?, ?, ?, ?, ?)",
+		id1, receiverID, senderID, senderPublicKey, now,
 	)
 	if err != nil {
 		tx.Rollback()
@@ -250,8 +269,8 @@ func AcceptFriendRequest(requestID, senderID, receiverID string) error {
 	}
 
 	_, err = tx.Exec(
-		"INSERT INTO friends (id, user_id, friend_user_id, created_at) VALUES (?, ?, ?, ?)",
-		id2, senderID, receiverID, now,
+		"INSERT INTO friends (id, user_id, friend_user_id, public_key, created_at) VALUES (?, ?, ?, ?, ?)",
+		id2, senderID, receiverID, receiverPublicKey, now,
 	)
 	if err != nil {
 		tx.Rollback()
@@ -271,15 +290,31 @@ func RejectFriendRequest(requestID string) error {
 }
 
 // Message operations
-func StoreMessage(senderID, receiverID, content string, isHeart bool) error {
+func StoreMessage(senderID, receiverID, content string, isHeart bool) (Message, error) {
 	id := uuid.New().String()
 	now := time.Now()
 
+	isHeartInt := 0
+	if isHeart {
+		isHeartInt = 1
+	}
+
 	_, err := db.Exec(
 		"INSERT INTO messages (id, sender_id, receiver_id, content, is_heart, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		id, senderID, receiverID, content, isHeart, now,
+		id, senderID, receiverID, content, isHeartInt, now,
 	)
-	return err
+	if err != nil {
+		return Message{}, err
+	}
+
+	return Message{
+		ID:         id,
+		SenderID:   senderID,
+		ReceiverID: receiverID,
+		Content:    content,
+		IsHeart:    isHeart,
+		CreatedAt:  now,
+	}, nil
 }
 
 func GetMessageHistory(userID, friendID string, limit, offset int) ([]Message, error) {

@@ -162,9 +162,9 @@ func (c *Client) WritePump() {
 func (c *Client) handleMessage(msg *WSMessage) {
 	switch msg.Type {
 	case "message", "heart":
-		// Store message in database
+		// Store message in database and obtain timestamp
 		isHeart := msg.Type == "heart"
-		err := StoreMessage(c.ID, msg.ReceiverID, msg.Content, isHeart)
+		storedMsg, err := StoreMessage(c.ID, msg.ReceiverID, msg.Content, isHeart)
 		if err != nil {
 			log.Printf("Failed to store message: %v", err)
 			return
@@ -182,8 +182,17 @@ func (c *Client) handleMessage(msg *WSMessage) {
 			return
 		}
 
+		// Prepare outgoing WSMessage with timestamp
+		out := WSMessage{
+			Type:       msg.Type,
+			SenderID:   c.ID,
+			ReceiverID: msg.ReceiverID,
+			Content:    msg.Content,
+			CreatedAt:  storedMsg.CreatedAt,
+		}
+
 		// Send to receiver if connected
-		c.manager.SendToClient(msg.ReceiverID, msg)
+		c.manager.SendToClient(msg.ReceiverID, out)
 
 	case "typing":
 		// Send typing indicator to receiver

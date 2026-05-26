@@ -13,21 +13,24 @@ type User struct {
 
 // FriendRequest represents a friend request between two users
 type FriendRequest struct {
-	ID         string    `json:"id"`
-	SenderID   string    `json:"sender_id"`
-	ReceiverID string    `json:"receiver_id"`
-	Status     string    `json:"status"` // pending, accepted, rejected
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	SenderID        string    `json:"sender_id"`
+	SenderPublicKey string    `json:"sender_public_key"`
+	SenderUsername  string    `json:"sender_username"`
+	ReceiverID      string    `json:"receiver_id"`
+	Status          string    `json:"status"` // pending, accepted, rejected
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Friend represents a friendship between two users
 type Friend struct {
-	ID           string    `json:"id"`
-	UserID       string    `json:"user_id"`
-	FriendUserID string    `json:"friend_user_id"`
-	PublicKey    string    `json:"public_key"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	FriendUserID   string    `json:"friend_user_id"`
+	FriendUsername string    `json:"friend_username"`
+	PublicKey      string    `json:"public_key"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // Message represents a chat message
@@ -50,10 +53,11 @@ type BlockedUser struct {
 
 // WSMessage represents a message sent over WebSocket
 type WSMessage struct {
-	Type       string `json:"type"` // message, heart, typing, etc.
-	SenderID   string `json:"sender_id"`
-	ReceiverID string `json:"receiver_id"`
-	Content    string `json:"content"`
+	Type       string    `json:"type"` // message, heart, typing, etc.
+	SenderID   string    `json:"sender_id"`
+	ReceiverID string    `json:"receiver_id"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // AuthRequest represents a login/register request

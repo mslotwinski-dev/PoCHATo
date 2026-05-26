@@ -110,8 +110,8 @@ func (ac *APIClient) GetMe() (User, error) {
 }
 
 // AddFriend sends a friend request
-func (ac *APIClient) AddFriend(username string) error {
-	payload := map[string]string{"username": username}
+func (ac *APIClient) AddFriend(username, publicKey string) error {
+	payload := map[string]string{"username": username, "public_key": publicKey}
 	body, _ := json.Marshal(payload)
 
 	req, _ := http.NewRequest("POST", ac.baseURL+"/api/friends/add", bytes.NewBuffer(body))
@@ -153,9 +153,9 @@ func (ac *APIClient) GetFriendRequests() ([]FriendRequest, error) {
 	return requests, nil
 }
 
-// AcceptFriendRequest accepts a friend request
-func (ac *APIClient) AcceptFriendRequest(requestID string) error {
-	payload := map[string]string{"request_id": requestID}
+// AcceptFriendRequest accepts a friend request and provides our public key
+func (ac *APIClient) AcceptFriendRequest(requestID, publicKey string) error {
+	payload := map[string]string{"request_id": requestID, "public_key": publicKey}
 	body, _ := json.Marshal(payload)
 
 	req, _ := http.NewRequest("POST", ac.baseURL+"/api/friends/accept", bytes.NewBuffer(body))
@@ -169,7 +169,8 @@ func (ac *APIClient) AcceptFriendRequest(requestID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to accept friend request")
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to accept friend request: %s", string(bodyBytes))
 	}
 
 	return nil
@@ -189,7 +190,8 @@ func (ac *APIClient) GetFriends() ([]Friend, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return friends, fmt.Errorf("failed to get friends list")
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return friends, fmt.Errorf("failed to get friends list: %s", string(bodyBytes))
 	}
 
 	json.NewDecoder(resp.Body).Decode(&friends)

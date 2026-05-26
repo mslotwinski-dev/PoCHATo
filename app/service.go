@@ -33,6 +33,11 @@ type Service struct {
 	chatCancel   context.CancelFunc
 	chatMessages chan ChatMessage
 	chatStatus   chan string
+	// event listener
+	eventClient   *WSClient
+	eventCancel   context.CancelFunc
+	eventMu       sync.Mutex
+	eventHandlers []func()
 }
 
 // NewService constructs the client service and loads local preferences.
@@ -114,6 +119,8 @@ func (s *Service) Register(username, email, password string) (User, error) {
 	s.mu.Lock()
 	s.currentUser = response.User
 	s.mu.Unlock()
+	// start background event listener
+	go s.startEventListener()
 	return response.User, nil
 }
 
@@ -135,6 +142,8 @@ func (s *Service) Login(username, password string) (User, error) {
 	s.mu.Lock()
 	s.currentUser = response.User
 	s.mu.Unlock()
+	// start background event listener
+	go s.startEventListener()
 	return response.User, nil
 }
 
@@ -166,25 +175,36 @@ func (s *Service) FriendRequests() ([]FriendRequest, error) {
 
 // AddFriend sends a friend request by username.
 func (s *Service) AddFriend(username string) error {
-	return s.api.AddFriend(username)
+	s.mu.RLock()
+	pub := s.localKeys.PublicKey
+	s.mu.RUnlock()
+	return s.api.AddFriend(username, pub)
 }
 
 // AcceptFriendRequest accepts a request and exchanges public keys.
 func (s *Service) AcceptFriendRequest(request FriendRequest) error {
-	if err := s.api.AcceptFriendRequest(request.ID); err != nil {
+	s.mu.RLock()
+	myPublicKey := s.localKeys.PublicKey
+	s.mu.RUnlock()
+
+	if err := s.api.AcceptFriendRequest(request.ID, myPublicKey); err != nil {
 		return err
 	}
 
-	pubKey, _, err := GenerateKeyPair()
+	// Fetch updated friend list to get the sender's public key
+	friends, err := s.api.GetFriends()
 	if err != nil {
 		return err
 	}
 
-	if err := s.api.UpdatePublicKey(request.SenderID, pubKey); err != nil {
-		return err
+	// Find and save the new friend's public key
+	for _, friend := range friends {
+		if friend.FriendUserID == request.SenderID && friend.PublicKey != "" {
+			return s.storage.SaveFriendPublicKey(request.SenderID, friend.PublicKey)
+		}
 	}
 
-	return s.storage.SaveFriendPublicKey(request.SenderID, pubKey)
+	return nil
 }
 
 // BlockedUsers returns the local block list.
@@ -196,6 +216,7 @@ func (s *Service) BlockedUsers() ([]BlockedUser, error) {
 func (s *Service) LoadHistory(friend Friend, limit int) ([]ChatMessage, error) {
 	s.mu.RLock()
 	currentUser := s.currentUser
+	privateKey := s.localKeys.PrivateKey
 	s.mu.RUnlock()
 
 	messages, err := s.api.GetMessageHistory(friend.FriendUserID, limit, 0)
@@ -205,10 +226,17 @@ func (s *Service) LoadHistory(friend Friend, limit int) ([]ChatMessage, error) {
 
 	history := make([]ChatMessage, 0, len(messages))
 	for _, message := range messages {
+		content := message.Content
+		// Try to decrypt if we have a private key
+		if strings.TrimSpace(privateKey) != "" && message.SenderID != currentUser.ID {
+			if decrypted, err := DecryptMessage(privateKey, message.Content); err == nil {
+				content = decrypted
+			}
+		}
 		history = append(history, ChatMessage{
 			SenderID:   message.SenderID,
 			ReceiverID: message.ReceiverID,
-			Content:    message.Content,
+			Content:    content,
 			IsHeart:    message.IsHeart,
 			Incoming:   message.SenderID != currentUser.ID,
 			CreatedAt:  message.CreatedAt,
@@ -221,6 +249,19 @@ func (s *Service) LoadHistory(friend Friend, limit int) ([]ChatMessage, error) {
 // StartChat connects to the websocket and streams decrypted messages.
 func (s *Service) StartChat(friend Friend) (<-chan ChatMessage, <-chan string, error) {
 	s.StopChat()
+
+	// If public key is missing, try to fetch fresh friend data from API
+	if strings.TrimSpace(friend.PublicKey) == "" {
+		updatedFriends, err := s.api.GetFriends()
+		if err == nil {
+			for _, f := range updatedFriends {
+				if f.FriendUserID == friend.FriendUserID && f.PublicKey != "" {
+					friend.PublicKey = f.PublicKey
+					break
+				}
+			}
+		}
+	}
 
 	s.mu.RLock()
 	privateKey := s.localKeys.PrivateKey
@@ -284,7 +325,25 @@ func (s *Service) SendMessage(content string, isHeart bool) error {
 		return fmt.Errorf("chat is not connected")
 	}
 
-	encrypted, err := EncryptMessage(friend.PublicKey, content)
+	// If public key is missing, try to fetch fresh friend data
+	publicKey := friend.PublicKey
+	if strings.TrimSpace(publicKey) == "" {
+		updatedFriends, err := s.api.GetFriends()
+		if err == nil {
+			for _, f := range updatedFriends {
+				if f.FriendUserID == friend.FriendUserID && f.PublicKey != "" {
+					publicKey = f.PublicKey
+					break
+				}
+			}
+		}
+	}
+
+	if strings.TrimSpace(publicKey) == "" {
+		return fmt.Errorf("friend's public key not available yet - wait for key exchange to complete")
+	}
+
+	encrypted, err := EncryptMessage(publicKey, content)
 	if err != nil {
 		return err
 	}
@@ -323,7 +382,99 @@ func (s *Service) resumeSession() (bool, error) {
 	s.mu.Lock()
 	s.currentUser = user
 	s.mu.Unlock()
+	// start background event listener
+	go s.startEventListener()
 	return true, nil
+}
+
+// RegisterEventHandler registers a callback invoked on friend-related events
+func (s *Service) RegisterEventHandler(fn func()) {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	s.eventHandlers = append(s.eventHandlers, fn)
+}
+
+func (s *Service) callEventHandlers() {
+	s.eventMu.Lock()
+	handlers := append([]func(){}, s.eventHandlers...)
+	s.eventMu.Unlock()
+	for _, h := range handlers {
+		go h()
+	}
+}
+
+// startEventListener maintains a persistent websocket listening for global events
+func (s *Service) startEventListener() {
+	s.eventMu.Lock()
+	// avoid starting multiple listeners
+	if s.eventClient != nil {
+		s.eventMu.Unlock()
+		return
+	}
+	s.eventMu.Unlock()
+
+	s.mu.RLock()
+	token := s.api.token
+	serverURL := s.config.ServerURL
+	s.mu.RUnlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.eventMu.Lock()
+	s.eventCancel = cancel
+	s.eventMu.Unlock()
+
+	backoff := time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		ws := NewWSClient(wsHostFromServerURL(serverURL), token)
+		if err := ws.Connect(); err != nil {
+			if !sleepOrDone(ctx, backoff) {
+				return
+			}
+			if backoff < 5*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		s.eventMu.Lock()
+		s.eventClient = ws
+		s.eventMu.Unlock()
+
+		receive := ws.ReceiveMessages()
+		for {
+			select {
+			case <-ctx.Done():
+				ws.Disconnect()
+				return
+			case msg := <-receive:
+				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_key_updated" {
+					s.callEventHandlers()
+				}
+			}
+		}
+	}
+}
+
+func (s *Service) stopEventListener() {
+	s.eventMu.Lock()
+	cancel := s.eventCancel
+	client := s.eventClient
+	s.eventCancel = nil
+	s.eventClient = nil
+	s.eventMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if client != nil {
+		client.Disconnect()
+	}
 }
 
 func (s *Service) ensureLocalKeys(userID string, forceGenerate bool) error {
@@ -363,7 +514,7 @@ func (s *Service) chatLoop(ctx context.Context, serverURL, token string, friend 
 		default:
 		}
 
-			signalStatus(status, "Connecting...")
+		signalStatus(status, "Connecting...")
 		wsClient := NewWSClient(wsHostFromServerURL(serverURL), token)
 		if err := wsClient.Connect(); err != nil {
 			signalStatus(status, fmt.Sprintf("Reconnect failed: %v", err))
@@ -396,6 +547,13 @@ func (s *Service) chatLoop(ctx context.Context, serverURL, token string, friend 
 					goto reconnect
 				}
 			case msg := <-receive:
+				// Handle friend-related events regardless of current active friend
+				if msg.Type == "friend_accepted" || msg.Type == "friend_request" || msg.Type == "friend_key_updated" {
+					// Ask UI to refresh lists
+					signalStatus(status, "refresh:friends")
+					continue
+				}
+
 				if msg.SenderID != friend.FriendUserID {
 					continue
 				}
@@ -406,12 +564,18 @@ func (s *Service) chatLoop(ctx context.Context, serverURL, token string, friend 
 					continue
 				}
 
+				createdAt := msg.CreatedAt
+				if createdAt.IsZero() {
+					createdAt = time.Now()
+				}
+
 				message := ChatMessage{
 					SenderID:   msg.SenderID,
 					ReceiverID: msg.ReceiverID,
 					Content:    decrypted,
 					IsHeart:    msg.Type == "heart",
 					Incoming:   true,
+					CreatedAt:  createdAt,
 				}
 
 				select {
