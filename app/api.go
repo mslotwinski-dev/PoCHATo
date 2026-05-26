@@ -290,8 +290,8 @@ func (ac *APIClient) UnblockUser(blockedUserID string) error {
 }
 
 // GetBlockedUsers retrieves list of blocked users
-func (ac *APIClient) GetBlockedUsers() ([]interface{}, error) {
-	var blocked []interface{}
+func (ac *APIClient) GetBlockedUsers() ([]BlockedUser, error) {
+	var blocked []BlockedUser
 
 	req, _ := http.NewRequest("GET", ac.baseURL+"/api/block/list", nil)
 	req.Header.Set("Authorization", ac.token)

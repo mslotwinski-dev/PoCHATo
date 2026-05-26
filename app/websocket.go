@@ -16,6 +16,7 @@ type WSClient struct {
 	conn        *websocket.Conn
 	send        chan interface{}
 	receive     chan WSMessage
+	status      chan bool
 	isConnected bool
 	mu          sync.RWMutex
 	stopChan    chan struct{}
@@ -29,6 +30,7 @@ func NewWSClient(wsURL, token string) *WSClient {
 		token:       token,
 		send:        make(chan interface{}, 256),
 		receive:     make(chan WSMessage, 256),
+		status:      make(chan bool, 8),
 		stopChan:    make(chan struct{}),
 		reconnectCh: make(chan struct{}),
 	}
@@ -51,6 +53,7 @@ func (wc *WSClient) Connect() error {
 	wc.conn = conn
 	wc.isConnected = true
 	wc.mu.Unlock()
+	wc.publishStatus(true)
 
 	go wc.readPump()
 	go wc.writePump()
@@ -105,6 +108,7 @@ func (wc *WSClient) Disconnect() {
 		wc.conn.Close()
 	}
 	wc.mu.Unlock()
+	wc.publishStatus(false)
 
 	select {
 	case wc.stopChan <- struct{}{}:
@@ -119,6 +123,7 @@ func (wc *WSClient) readPump() {
 		wc.isConnected = false
 		wc.conn.Close()
 		wc.mu.Unlock()
+		wc.publishStatus(false)
 	}()
 
 	for {
@@ -163,6 +168,7 @@ func (wc *WSClient) writePump() {
 			wc.conn.Close()
 		}
 		wc.mu.Unlock()
+		wc.publishStatus(false)
 	}()
 
 	for {
@@ -190,4 +196,16 @@ func (wc *WSClient) writePump() {
 // ReceiveMessages returns the receive channel
 func (wc *WSClient) ReceiveMessages() <-chan WSMessage {
 	return wc.receive
+}
+
+// ConnectionState returns a channel of connection state updates.
+func (wc *WSClient) ConnectionState() <-chan bool {
+	return wc.status
+}
+
+func (wc *WSClient) publishStatus(connected bool) {
+	select {
+	case wc.status <- connected:
+	default:
+	}
 }

@@ -41,6 +41,14 @@ type Message struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// BlockedUser represents a blocked user relationship.
+type BlockedUser struct {
+	ID            string    `json:"id"`
+	UserID        string    `json:"user_id"`
+	BlockedUserID string    `json:"blocked_user_id"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // LocalKeys stores user's RSA key pair
 type LocalKeys struct {
 	UserID     string
@@ -61,4 +69,9 @@ type AuthResponse struct {
 	Token  string `json:"token"`
 	UserID string `json:"user_id"`
 	User   User   `json:"user"`
+}
+
+// Preferences stores local desktop client settings.
+type Preferences struct {
+	ServerURL string `json:"server_url"`
 }

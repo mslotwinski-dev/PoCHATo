@@ -15,8 +15,7 @@ go mod download
 
 ### Step 2: Start the Server
 ```bash
-cd server
-go run .
+go run ./server
 ```
 
 You should see:
@@ -28,23 +27,11 @@ You should see:
 
 ### Step 3: Start the Client (New Terminal)
 ```bash
-cd app
 go run .
 ```
 
 ### Step 4: Create Your Account
-```
-1️⃣  Register
-2️⃣  Login
-
-👉 Choose an option: 1
-
-📝 Registration
-Username: alice
-Email: alice@example.com
-Password: password123
-✓ Registration successful!
-```
+The desktop app opens a native window with login and registration cards.
 
 ### Step 5: Add a Friend
 Start another client instance with a different username:
@@ -94,21 +81,19 @@ Bob's terminal will receive the encrypted message and decrypt it!
 ### Build Binaries
 ```bash
 # Build server
-cd server
-go build -o pochato-server
+go build -o pochato-server ./server
 
-# Build client
-cd ../app
-go build -o pochato-client
+# Build desktop client
+go build -o pochato-desktop .
 ```
 
 ### Run from Binaries
 ```bash
 # Terminal 1 - Server
-./server/pochato-server
+./pochato-server
 
 # Terminal 2 - Client
-./app/pochato-client
+./pochato-desktop
 ```
 
 ---

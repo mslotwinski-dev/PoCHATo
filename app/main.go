@@ -1,446 +1,549 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"log"
-	"os"
-	"strings"
+
+	// "time"
+	"sync"
+
+	"fyne.io/fyne/v2"
+
+	// "fyne.io/fyne/v2/container"
+	// "fyne.io/fyne/v2/dialog"
+	// "fyne.io/fyne/v2/theme"
+
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/widget"
 )
 
-var (
-	config      ClientConfig
-	api         *APIClient
-	wsClient    *WSClient
-	storage     *LocalStorage
-	currentUser User
-	localKeys   LocalKeys
-)
+type desktopUI struct {
+	svc *Service
+	app fyne.App
+	win fyne.Window
+
+	statusLabel      *widget.Label
+	userLabel        *widget.Label
+	friendHeader     *widget.Label
+	messageHeader    *widget.Label
+	messageEntry     *widget.Entry
+	serverURLEntry   *widget.Entry
+	newFriendEntry   *widget.Entry
+	requestStatus    *widget.Label
+	selectedFriend   *Friend
+	selectedRequest  int
+	friends          []Friend
+	requests         []FriendRequest
+	blocked          []BlockedUser
+	messages         []ChatMessage
+	friendList       *widget.List
+	requestList      *widget.List
+	blockedList      *widget.List
+	messageList      *widget.List
+	messageMu        sync.Mutex
+	activeChatCancel func()
+}
 
 func main() {
-	config = LoadClientConfig()
+	a := app.New()
+	w := a.NewWindow("Hello World")
 
-	var err error
-	storage, err = NewLocalStorage(config.DataDir)
-	if err != nil {
-		log.Fatalf("Failed to initialize local storage: %v", err)
-	}
-
-	api = NewAPIClient(config.ServerURL)
-
-	fmt.Println("╔════════════════════════════════════════════╗")
-	fmt.Println("║   🔒 poCHATo - Secure Chat Application    ║")
-	fmt.Println("║  End-to-End Encrypted Messaging System     ║")
-	fmt.Println("╚════════════════════════════════════════════╝")
-	fmt.Println()
-
-	// Check for existing session
-	_, token, err := storage.LoadSession()
-	if err == nil {
-		// Session exists, try to resume
-		api.SetToken(token)
-		user, err := api.GetMe()
-		if err == nil {
-			currentUser = user
-			localKeys, _ = storage.LoadKeys()
-			fmt.Printf("✓ Welcome back, %s!\n\n", user.Username)
-			mainMenu()
-			return
-		}
-	}
-
-	// No valid session, show auth menu
-	authMenu()
+	w.SetContent(widget.NewLabel("Hello World!"))
+	w.ShowAndRun()
 }
 
-func authMenu() {
-	reader := bufio.NewReader(os.Stdin)
+func runDesktopApp() {
 
-	fmt.Println("1️⃣  Register")
-	fmt.Println("2️⃣  Login")
-	fmt.Println("3️⃣  Exit")
-	fmt.Print("\n👉 Choose an option: ")
+	// svc, err := NewService()
+	// if err != nil {
+	// panic(err)
+	// }
 
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+	// guiApp := app.NewWithID("pochato.desktop")
+	// window := guiApp.NewWindow("poCHATo")
+	// window.Resize(fyne.NewSize(1280, 840))
 
-	switch choice {
-	case "1":
-		handleRegister(reader)
-	case "2":
-		handleLogin(reader)
-	case "3":
-		fmt.Println("Goodbye! 👋")
-		os.Exit(0)
-	default:
-		fmt.Println("❌ Invalid option")
-		authMenu()
-	}
+	// fmt.Println("Hello")
+
+	// ui := &desktopUI{
+	// 	svc: svc,
+	// 	app: guiApp,
+	// 	win: window,
+	// }
+
+	// window.SetCloseIntercept(func() {
+	// 	ui.svc.StopChat()
+	// 	ui.app.Quit()
+	// })
+
+	// if authenticated, _ := svc.Bootstrap(); authenticated {
+	// 	// ui.showMainScreen()
+	// 	// ui.refreshAll()
+	// } else {
+	// 	// ui.showAuthScreen()
+	// }
+
+	// window.ShowAndRun()
 }
 
-func handleRegister(reader *bufio.Reader) {
-	fmt.Println("\n📝 Registration")
-	fmt.Print("Username: ")
-	username, _ := reader.ReadString('\n')
-	username = strings.TrimSpace(username)
+// func (ui *desktopUI) showAuthScreen() {
+// 	config := ui.svc.Config()
+// 	ui.serverURLEntry = widget.NewEntry()
+// 	ui.serverURLEntry.SetText(config.ServerURL)
+// 	ui.serverURLEntry.SetPlaceHolder("http://localhost:8080")
 
-	fmt.Print("Email: ")
-	email, _ := reader.ReadString('\n')
-	email = strings.TrimSpace(email)
+// 	loginUsername := widget.NewEntry()
+// 	loginUsername.SetPlaceHolder("Username")
+// 	loginPassword := widget.NewPasswordEntry()
+// 	loginPassword.SetPlaceHolder("Password")
+// 	registerUsername := widget.NewEntry()
+// 	registerUsername.SetPlaceHolder("Username")
+// 	registerEmail := widget.NewEntry()
+// 	registerEmail.SetPlaceHolder("Email")
+// 	registerPassword := widget.NewPasswordEntry()
+// 	registerPassword.SetPlaceHolder("Password")
 
-	fmt.Print("Password: ")
-	password, _ := reader.ReadString('\n')
-	password = strings.TrimSpace(password)
+// 	loginButton := widget.NewButtonWithIcon("Login", theme.LoginIcon(), func() {
+// 		ui.runAsync(func() {
+// 			if err := ui.applyServerURL(); err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			_, err := ui.svc.Login(strings.TrimSpace(loginUsername.Text), strings.TrimSpace(loginPassword.Text))
+// 			if err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			ui.runOnMain(func() {
+// 				ui.showMainScreen()
+// 				ui.refreshAll()
+// 			})
+// 		})
+// 	})
 
-	response, err := api.Register(username, email, password)
-	if err != nil {
-		fmt.Printf("❌ Registration failed: %v\n", err)
-		authMenu()
-		return
-	}
+// 	registerButton := widget.NewButtonWithIcon("Register", theme.ContentAddIcon(), func() {
+// 		ui.runAsync(func() {
+// 			if err := ui.applyServerURL(); err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			_, err := ui.svc.Register(strings.TrimSpace(registerUsername.Text), strings.TrimSpace(registerEmail.Text), strings.TrimSpace(registerPassword.Text))
+// 			if err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			ui.runOnMain(func() {
+// 				ui.showMainScreen()
+// 				ui.refreshAll()
+// 			})
+// 		})
+// 	})
 
-	// Generate key pair
-	pubKey, privKey, err := GenerateKeyPair()
-	if err != nil {
-		fmt.Printf("❌ Failed to generate keys: %v\n", err)
-		return
-	}
+// 	form := container.NewVBox(
+// 		widget.NewLabelWithStyle("poCHATo", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+// 		widget.NewLabel("Secure desktop chat client"),
+// 		widget.NewCard("Server", "Set the backend endpoint", ui.serverURLEntry),
+// 		widget.NewCard("Login", "Use an existing account", container.NewVBox(loginUsername, loginPassword, loginButton)),
+// 		widget.NewCard("Register", "Create a new account", container.NewVBox(registerUsername, registerEmail, registerPassword, registerButton)),
+// 	)
 
-	// Save keys locally
-	storage.SaveKeys(response.UserID, pubKey, privKey)
-	storage.SaveSession(response.UserID, response.Token)
+// 	ui.win.SetContent(container.NewCenter(container.NewGridWrap(fyne.NewSize(460, 0), form)))
+// }
 
-	currentUser = response.User
-	localKeys = LocalKeys{
-		UserID:     response.UserID,
-		PublicKey:  pubKey,
-		PrivateKey: privKey,
-	}
+// func (ui *desktopUI) showMainScreen() {
+// 	ui.statusLabel = widget.NewLabel("Disconnected")
+// 	ui.userLabel = widget.NewLabel("Signed out")
+// 	ui.friendHeader = widget.NewLabel("Select a conversation")
+// 	ui.messageHeader = widget.NewLabel("Messages")
+// 	ui.requestStatus = widget.NewLabel("")
 
-	fmt.Println("✓ Registration successful!")
-	fmt.Printf("✓ User ID: %s\n", response.UserID)
-	fmt.Println()
-	mainMenu()
-}
+// 	ui.messageEntry = widget.NewEntry()
+// 	ui.messageEntry.SetPlaceHolder("Type a message")
+// 	ui.messageEntry.OnSubmitted = func(_ string) {
+// 		ui.sendMessage(false)
+// 	}
 
-func handleLogin(reader *bufio.Reader) {
-	fmt.Println("\n🔐 Login")
-	fmt.Print("Username: ")
-	username, _ := reader.ReadString('\n')
-	username = strings.TrimSpace(username)
+// 	ui.newFriendEntry = widget.NewEntry()
+// 	ui.newFriendEntry.SetPlaceHolder("Friend username")
 
-	fmt.Print("Password: ")
-	password, _ := reader.ReadString('\n')
-	password = strings.TrimSpace(password)
+// 	ui.friendList = widget.NewList(
+// 		func() int { return len(ui.friends) },
+// 		func() fyne.CanvasObject { return widget.NewLabel("") },
+// 		func(id widget.ListItemID, object fyne.CanvasObject) {
+// 			label := object.(*widget.Label)
+// 			if id >= 0 && id < len(ui.friends) {
+// 				label.SetText(ui.shortID(ui.friends[id].FriendUserID))
+// 			}
+// 		},
+// 	)
+// 	ui.friendList.OnSelected = func(id widget.ListItemID) {
+// 		if id >= 0 && id < len(ui.friends) {
+// 			friend := ui.friends[id]
+// 			ui.openFriend(friend)
+// 		}
+// 	}
 
-	response, err := api.Login(username, password)
-	if err != nil {
-		fmt.Printf("❌ Login failed: %v\n", err)
-		authMenu()
-		return
-	}
+// 	ui.requestList = widget.NewList(
+// 		func() int { return len(ui.requests) },
+// 		func() fyne.CanvasObject { return widget.NewLabel("") },
+// 		func(id widget.ListItemID, object fyne.CanvasObject) {
+// 			label := object.(*widget.Label)
+// 			if id >= 0 && id < len(ui.requests) {
+// 				label.SetText(fmt.Sprintf("From %s", ui.shortID(ui.requests[id].SenderID)))
+// 			}
+// 		},
+// 	)
+// 	ui.requestList.OnSelected = func(id widget.ListItemID) {
+// 		ui.selectedRequest = int(id)
+// 		if id >= 0 && id < len(ui.requests) {
+// 			ui.requestStatus.SetText(fmt.Sprintf("Selected request from %s", ui.shortID(ui.requests[id].SenderID)))
+// 		}
+// 	}
 
-	// Load or generate keys
-	keys, err := storage.LoadKeys()
-	if err != nil {
-		// Generate new key pair if not found
-		pubKey, privKey, err := GenerateKeyPair()
-		if err != nil {
-			fmt.Printf("❌ Failed to generate keys: %v\n", err)
-			return
-		}
-		storage.SaveKeys(response.UserID, pubKey, privKey)
-		localKeys = LocalKeys{
-			UserID:     response.UserID,
-			PublicKey:  pubKey,
-			PrivateKey: privKey,
-		}
-	} else {
-		localKeys = keys
-	}
+// 	acceptRequest := widget.NewButtonWithIcon("Accept", theme.ContentAddIcon(), func() {
+// 		ui.acceptSelectedRequest()
+// 	})
+// 	refreshRequests := widget.NewButtonWithIcon("Refresh", theme.ViewRefreshIcon(), func() {
+// 		ui.refreshRequests()
+// 	})
 
-	storage.SaveSession(response.UserID, response.Token)
-	currentUser = response.User
+// 	ui.blockedList = widget.NewList(
+// 		func() int { return len(ui.blocked) },
+// 		func() fyne.CanvasObject { return widget.NewLabel("") },
+// 		func(id widget.ListItemID, object fyne.CanvasObject) {
+// 			label := object.(*widget.Label)
+// 			if id >= 0 && id < len(ui.blocked) {
+// 				label.SetText(ui.shortID(ui.blocked[id].BlockedUserID))
+// 			}
+// 		},
+// 	)
 
-	fmt.Println("✓ Login successful!")
-	fmt.Printf("✓ Welcome, %s!\n", response.User.Username)
-	fmt.Println()
-	mainMenu()
-}
+// 	addFriendButton := widget.NewButtonWithIcon("Add Friend", theme.ContentAddIcon(), func() {
+// 		username := strings.TrimSpace(ui.newFriendEntry.Text)
+// 		if username == "" {
+// 			return
+// 		}
+// 		ui.runAsync(func() {
+// 			if err := ui.svc.AddFriend(username); err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			ui.runOnMain(func() {
+// 				ui.newFriendEntry.SetText("")
+// 				ui.refreshRequests()
+// 			})
+// 		})
+// 	})
 
-func mainMenu() {
-	reader := bufio.NewReader(os.Stdin)
+// 	friendPanel := container.NewBorder(
+// 		container.NewVBox(
+// 			widget.NewLabelWithStyle("Friends", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+// 			container.NewHBox(ui.newFriendEntry, addFriendButton),
+// 		),
+// 		nil,
+// 		nil,
+// 		nil,
+// 		ui.friendList,
+// 	)
 
-	fmt.Println("═══════════════════════════════════════════")
-	fmt.Printf("👤 Logged in as: %s\n", currentUser.Username)
-	fmt.Println("═══════════════════════════════════════════")
-	fmt.Println()
-	fmt.Println("1️⃣  View Friends")
-	fmt.Println("2️⃣  Add Friend")
-	fmt.Println("3️⃣  View Friend Requests")
-	fmt.Println("4️⃣  Chat with Friend")
-	fmt.Println("5️⃣  View Blocked Users")
-	fmt.Println("6️⃣  Logout")
-	fmt.Println("7️⃣  Exit")
-	fmt.Print("\n👉 Choose an option: ")
+// 	requestPanel := container.NewBorder(
+// 		container.NewVBox(widget.NewLabelWithStyle("Requests", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), ui.requestStatus, container.NewHBox(acceptRequest, refreshRequests)),
+// 		nil,
+// 		nil,
+// 		nil,
+// 		ui.requestList,
+// 	)
 
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+// 	blockedPanel := container.NewBorder(
+// 		widget.NewLabelWithStyle("Blocked", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+// 		nil,
+// 		nil,
+// 		nil,
+// 		ui.blockedList,
+// 	)
 
-	switch choice {
-	case "1":
-		viewFriends()
-	case "2":
-		addFriend(reader)
-	case "3":
-		viewFriendRequests(reader)
-	case "4":
-		chatWithFriend(reader)
-	case "5":
-		viewBlockedUsers()
-	case "6":
-		logout()
-	case "7":
-		fmt.Println("Goodbye! 👋")
-		os.Exit(0)
-	default:
-		fmt.Println("❌ Invalid option")
-		mainMenu()
-	}
-}
+// 	navTabs := container.NewAppTabs(
+// 		container.NewTabItem("Friends", friendPanel),
+// 		container.NewTabItem("Requests", requestPanel),
+// 		container.NewTabItem("Blocked", blockedPanel),
+// 	)
 
-func viewFriends() {
-	friends, err := api.GetFriends()
-	if err != nil {
-		fmt.Printf("❌ Failed to get friends: %v\n", err)
-		mainMenu()
-		return
-	}
+// 	ui.messageList = widget.NewList(
+// 		func() int { return len(ui.messages) },
+// 		func() fyne.CanvasObject {
+// 			lbl1 := widget.NewLabel("")
+// 			lbl2 := widget.NewLabel("")
+// 			lbl2.Wrapping = fyne.TextWrapWord
+// 			return container.NewVBox(lbl1, lbl2)
+// 		},
+// 		func(id widget.ListItemID, object fyne.CanvasObject) {
+// 			if id < 0 || id >= len(ui.messages) {
+// 				return
+// 			}
+// 			card := object.(*fyne.Container)
+// 			title := card.Objects[0].(*widget.Label)
+// 			body := card.Objects[1].(*widget.Label)
+// 			message := ui.messages[id]
+// 			if message.Incoming {
+// 				title.SetText(fmt.Sprintf("%s · %s", ui.shortID(message.SenderID), message.CreatedAt.Format(time.Kitchen)))
+// 			} else {
+// 				title.SetText(fmt.Sprintf("You · %s", message.CreatedAt.Format(time.Kitchen)))
+// 			}
+// 			if message.IsHeart {
+// 				body.SetText("❤️ " + message.Content)
+// 			} else {
+// 				body.SetText(message.Content)
+// 			}
+// 		},
+// 	)
 
-	if len(friends) == 0 {
-		fmt.Println("\n📭 You have no friends yet!")
-	} else {
-		fmt.Println("\n👥 Your Friends:")
-		fmt.Println("─────────────────────────────────────────")
-		for _, friend := range friends {
-			status := "⚪ Offline"
-			fmt.Printf("• %s (%s)\n", friend.FriendUserID, status)
-		}
-	}
+// 	sendButton := widget.NewButtonWithIcon("Send", theme.MailSendIcon(), func() {
+// 		ui.sendMessage(false)
+// 	})
+// 	heartButton := widget.NewButtonWithIcon("Heart", theme.ConfirmIcon(), func() {
+// 		ui.sendMessage(true)
+// 	})
+// 	messageControls := container.NewBorder(nil, nil, nil, container.NewHBox(heartButton, sendButton), ui.messageEntry)
+// 	chatPane := container.NewBorder(
+// 		container.NewVBox(ui.friendHeader, ui.statusLabel, ui.messageHeader),
+// 		messageControls,
+// 		nil,
+// 		nil,
+// 		ui.messageList,
+// 	)
 
-	fmt.Println()
-	mainMenu()
-}
+// 	split := container.NewHSplit(navTabs, chatPane)
+// 	split.Offset = 0.30
 
-func addFriend(reader *bufio.Reader) {
-	fmt.Print("\n👤 Enter friend's username: ")
-	username, _ := reader.ReadString('\n')
-	username = strings.TrimSpace(username)
+// 	settingsButton := widget.NewButtonWithIcon("Settings", theme.SettingsIcon(), func() {
+// 		ui.showSettingsDialog()
+// 	})
+// 	logoutButton := widget.NewButtonWithIcon("Logout", theme.LogoutIcon(), func() {
+// 		ui.runAsync(func() {
+// 			if err := ui.svc.Logout(); err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			ui.runOnMain(func() {
+// 				ui.showAuthScreen()
+// 			})
+// 		})
+// 	})
+// 	ui.refreshUserBadge()
+// 	toolbar := container.NewBorder(nil, nil, nil, container.NewHBox(settingsButton, logoutButton), ui.userLabel)
+// 	ui.win.SetContent(container.NewBorder(toolbar, nil, nil, nil, split))
+// }
 
-	err := api.AddFriend(username)
-	if err != nil {
-		fmt.Printf("❌ Failed to add friend: %v\n", err)
-	} else {
-		fmt.Println("✓ Friend request sent!")
-	}
+// func (ui *desktopUI) refreshAll() {
+// 	ui.refreshUserBadge()
+// 	ui.refreshFriends()
+// 	ui.refreshRequests()
+// 	ui.refreshBlocked()
+// }
 
-	fmt.Println()
-	mainMenu()
-}
+// func (ui *desktopUI) refreshUserBadge() {
+// 	if user, ok := ui.svc.CurrentUser(); ok {
+// 		ui.userLabel.SetText(fmt.Sprintf("Signed in as %s", user.Username))
+// 	} else {
+// 		ui.userLabel.SetText("Signed out")
+// 	}
+// }
 
-func viewFriendRequests(reader *bufio.Reader) {
-	requests, err := api.GetFriendRequests()
-	if err != nil {
-		fmt.Printf("❌ Failed to get friend requests: %v\n", err)
-		mainMenu()
-		return
-	}
+// func (ui *desktopUI) refreshFriends() {
+// 	ui.runAsync(func() {
+// 		friends, err := ui.svc.Friends()
+// 		if err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
+// 		ui.runOnMain(func() {
+// 			ui.friends = friends
+// 			ui.friendList.Refresh()
+// 		})
+// 	})
+// }
 
-	if len(requests) == 0 {
-		fmt.Println("\n📭 No pending friend requests!")
-		mainMenu()
-		return
-	}
+// func (ui *desktopUI) refreshRequests() {
+// 	ui.runAsync(func() {
+// 		requests, err := ui.svc.FriendRequests()
+// 		if err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
+// 		ui.runOnMain(func() {
+// 			ui.requests = requests
+// 			ui.selectedRequest = -1
+// 			ui.requestStatus.SetText("")
+// 			ui.requestList.Refresh()
+// 		})
+// 	})
+// }
 
-	fmt.Println("\n📬 Friend Requests:")
-	fmt.Println("─────────────────────────────────────────")
-	for i, req := range requests {
-		fmt.Printf("%d. From: %s\n", i+1, req.SenderID)
-	}
+// func (ui *desktopUI) refreshBlocked() {
+// 	ui.runAsync(func() {
+// 		blocked, err := ui.svc.BlockedUsers()
+// 		if err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
+// 		ui.runOnMain(func() {
+// 			ui.blocked = blocked
+// 			ui.blockedList.Refresh()
+// 		})
+// 	})
+// }
 
-	fmt.Print("\n👉 Accept request number (0 to skip): ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+// func (ui *desktopUI) openFriend(friend Friend) {
+// 	ui.selectedFriend = &friend
+// 	ui.friendHeader.SetText(fmt.Sprintf("Conversation with %s", ui.shortID(friend.FriendUserID)))
+// 	ui.statusLabel.SetText("Connecting...")
+// 	ui.messages = nil
+// 	ui.messageList.Refresh()
 
-	if choice == "0" {
-		mainMenu()
-		return
-	}
+// 	ui.runAsync(func() {
+// 		ui.runOnMain(func() {
+// 			ui.messageHeader.SetText("Loading history...")
+// 		})
+// 		history, err := ui.svc.LoadHistory(friend, 50)
+// 		if err == nil {
+// 			ui.runOnMain(func() {
+// 				ui.messages = history
+// 				ui.messageHeader.SetText(fmt.Sprintf("Messages with %s", ui.shortID(friend.FriendUserID)))
+// 				ui.messageList.Refresh()
+// 			})
+// 		}
 
-	// Parse choice and accept request
-	for i, req := range requests {
-		if fmt.Sprintf("%d", i+1) == choice {
-			err := api.AcceptFriendRequest(req.ID)
-			if err != nil {
-				fmt.Printf("❌ Failed to accept request: %v\n", err)
-			} else {
-				fmt.Println("✓ Friend request accepted!")
+// 		messages, status, err := ui.svc.StartChat(friend)
+// 		if err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
 
-				// Exchange public keys
-				pubKey, _, _ := GenerateKeyPair()
-				api.UpdatePublicKey(req.SenderID, pubKey)
-				storage.SaveFriendPublicKey(req.SenderID, pubKey)
-			}
-			break
-		}
-	}
+// 		go func() {
+// 			for msg := range messages {
+// 				msgCopy := msg
 
-	fmt.Println()
-	mainMenu()
-}
+// 				ui.runOnMain(func() {
+// 					ui.messages = append(ui.messages, msgCopy)
+// 					ui.messageList.Refresh()
+// 				})
+// 			}
+// 		}()
 
-func chatWithFriend(reader *bufio.Reader) {
-	friends, err := api.GetFriends()
-	if err != nil || len(friends) == 0 {
-		fmt.Println("❌ No friends available")
-		mainMenu()
-		return
-	}
+// 		go func() {
+// 			for state := range status {
+// 				text := state
+// 				ui.runOnMain(func() {
+// 					ui.statusLabel.SetText(text)
+// 				})
+// 			}
+// 		}()
+// 	})
+// }
 
-	fmt.Println("\n👥 Select Friend:")
-	for i, friend := range friends {
-		fmt.Printf("%d. %s\n", i+1, friend.FriendUserID)
-	}
+// func (ui *desktopUI) sendMessage(isHeart bool) {
+// 	if ui.selectedFriend == nil {
+// 		return
+// 	}
+// 	text := strings.TrimSpace(ui.messageEntry.Text)
+// 	if text == "" && !isHeart {
+// 		return
+// 	}
+// 	if isHeart && text == "" {
+// 		text = "❤️"
+// 	}
 
-	fmt.Print("\n👉 Enter friend number (0 to skip): ")
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
+// 	friend := *ui.selectedFriend
+// 	ui.runAsync(func() {
+// 		if err := ui.svc.SendMessage(text, isHeart); err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
+// 		ui.runOnMain(func() {
+// 			ui.messages = append(ui.messages, ChatMessage{
+// 				SenderID:  "me",
+// 				Content:   text,
+// 				IsHeart:   isHeart,
+// 				Incoming:  false,
+// 				CreatedAt: time.Now(),
+// 			})
+// 			ui.messageEntry.SetText("")
+// 			ui.friendHeader.SetText(fmt.Sprintf("Conversation with %s", ui.shortID(friend.FriendUserID)))
+// 			ui.messageList.Refresh()
+// 		})
+// 	})
+// }
 
-	if choice == "0" {
-		mainMenu()
-		return
-	}
+// func (ui *desktopUI) acceptSelectedRequest() {
+// 	if ui.selectedRequest < 0 || ui.selectedRequest >= len(ui.requests) {
+// 		return
+// 	}
+// 	request := ui.requests[ui.selectedRequest]
+// 	ui.runAsync(func() {
+// 		if err := ui.svc.AcceptFriendRequest(request); err != nil {
+// 			ui.showError(err)
+// 			return
+// 		}
+// 		ui.runOnMain(func() {
+// 			ui.refreshRequests()
+// 			ui.refreshFriends()
+// 			ui.refreshBlocked()
+// 		})
+// 	})
+// }
 
-	var selectedFriend Friend
-	for i, friend := range friends {
-		if fmt.Sprintf("%d", i+1) == choice {
-			selectedFriend = friend
-			break
-		}
-	}
+// func (ui *desktopUI) showSettingsDialog() {
+// 	config := ui.svc.Config()
+// 	field := widget.NewEntry()
+// 	field.SetText(config.ServerURL)
+// 	info := widget.NewLabel(fmt.Sprintf("Data directory: %s", config.DataDir))
+// 	content := container.NewVBox(field, info)
+// 	dialog.ShowCustomConfirm("Settings", "Save", "Cancel", content, func(ok bool) {
+// 		if !ok {
+// 			return
+// 		}
+// 		ui.runAsync(func() {
+// 			if err := ui.svc.UpdateServerURL(field.Text); err != nil {
+// 				ui.showError(err)
+// 				return
+// 			}
+// 			ui.runOnMain(func() {
+// 				ui.statusLabel.SetText("Server URL saved. Re-login to use the new server.")
+// 			})
+// 		})
+// 	}, ui.win)
+// }
 
-	if selectedFriend.FriendUserID == "" {
-		fmt.Println("❌ Invalid selection")
-		mainMenu()
-		return
-	}
+// func (ui *desktopUI) applyServerURL() error {
+// 	if ui.serverURLEntry == nil {
+// 		return nil
+// 	}
+// 	current := ui.svc.Config().ServerURL
+// 	if strings.TrimSpace(ui.serverURLEntry.Text) == "" || strings.TrimSpace(ui.serverURLEntry.Text) == current {
+// 		return nil
+// 	}
+// 	return ui.svc.UpdateServerURL(ui.serverURLEntry.Text)
+// }
 
-	// Start WebSocket connection
-	wsURL := strings.TrimPrefix(config.ServerURL, "http://")
-	wsClient = NewWSClient(wsURL, api.token)
+// func (ui *desktopUI) showError(err error) {
+// 	if err == nil {
+// 		return
+// 	}
+// 	ui.runOnMain(func() {
+// 		dialog.ShowError(err, ui.win)
+// 	})
+// }
 
-	if err := wsClient.Connect(); err != nil {
-		fmt.Printf("❌ Failed to connect: %v\n", err)
-		mainMenu()
-		return
-	}
+// func (ui *desktopUI) runAsync(fn func()) {
+// 	go fn()
+// }
 
-	fmt.Printf("\n💬 Chat with %s (Type 'exit' to quit)\n", selectedFriend.FriendUserID)
-	fmt.Println("─────────────────────────────────────────")
+// func (ui *desktopUI) runOnMain(fn func()) {
+// 	fyne.Do(fn)
+// }
 
-	// Load message history
-	history, _ := api.GetMessageHistory(selectedFriend.FriendUserID, 10, 0)
-	if len(history) > 0 {
-		fmt.Println("📜 Recent Messages:")
-		for _, msg := range history {
-			prefix := "You:"
-			if msg.SenderID != currentUser.ID {
-				prefix = "Them:"
-			}
-			emoji := "💬"
-			if msg.IsHeart {
-				emoji = "❤️"
-			}
-			fmt.Printf("%s %s %s\n", emoji, prefix, msg.Content)
-		}
-		fmt.Println("─────────────────────────────────────────")
-	}
-
-	// Chat input loop
-	go handleIncomingMessages(selectedFriend.FriendUserID)
-
-	for {
-		fmt.Print("You: ")
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
-
-		if input == "exit" {
-			wsClient.Disconnect()
-			mainMenu()
-			return
-		}
-
-		if input == "" {
-			continue
-		}
-
-		// Check if heart message
-		isHeart := strings.ToLower(input) == "❤️" || strings.ToLower(input) == "heart"
-
-		// Encrypt message
-		encryptedMsg, err := EncryptMessage(selectedFriend.PublicKey, input)
-		if err != nil {
-			fmt.Printf("❌ Encryption failed: %v\n", err)
-			continue
-		}
-
-		// Send via WebSocket
-		wsClient.SendMessage(selectedFriend.FriendUserID, encryptedMsg, isHeart)
-		fmt.Println("✓ Message sent")
-	}
-}
-
-func handleIncomingMessages(friendID string) {
-	for msg := range wsClient.ReceiveMessages() {
-		if msg.SenderID == friendID {
-			// Decrypt message
-			decrypted, err := DecryptMessage(localKeys.PrivateKey, msg.Content)
-			if err != nil {
-				fmt.Printf("❌ Decryption failed: %v\n", err)
-				continue
-			}
-
-			emoji := "💬"
-			if msg.Type == "heart" {
-				emoji = "❤️"
-			}
-
-			fmt.Printf("\n%s Them: %s\n", emoji, decrypted)
-			fmt.Print("You: ")
-		}
-	}
-}
-
-func viewBlockedUsers() {
-	blocked, err := api.GetBlockedUsers()
-	if err != nil || len(blocked) == 0 {
-		fmt.Println("\n✓ You haven't blocked anyone!")
-	} else {
-		fmt.Println("\n🚫 Blocked Users:")
-		fmt.Println("─────────────────────────────────────────")
-		for _, user := range blocked {
-			fmt.Printf("• %v\n", user)
-		}
-	}
-
-	fmt.Println()
-	mainMenu()
-}
-
-func logout() {
-	storage.ClearSession()
-	api = NewAPIClient(config.ServerURL)
-	currentUser = User{}
-	fmt.Println("✓ Logged out successfully!\n")
-	authMenu()
-}
+// func (ui *desktopUI) shortID(value string) string {
+// 	value = strings.TrimSpace(value)
+// 	if len(value) <= 12 {
+// 		return value
+// 	}
+// 	return value[:12] + "…"
+// }

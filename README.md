@@ -51,7 +51,7 @@ poCHATo consists of a backend server and a client application, strictly separati
 * **API Client:** HTTP client for REST API communication
 * **WebSocket Client:** Gorilla WebSockets for real-time messaging
 * **Cryptography:** crypto/rsa for E2EE, local JSON-based storage for keys
-* **Interface:** Interactive CLI with menu-driven interface
+* **Interface:** Fyne desktop GUI with native windowing on Windows, Linux, and macOS
 
 ---
 
@@ -96,8 +96,7 @@ To ensure the server cannot read messages, poCHATo implements a strict cryptogra
 ### Running the Server
 
 ```bash
-cd server
-go run .
+go run ./server
 ```
 
 Expected output:
@@ -107,15 +106,14 @@ Expected output:
 📝 Database: ./pochato.db
 ```
 
-### Running the Client
+### Running the Desktop Client
 
 In a different terminal:
 ```bash
-cd app
 go run .
 ```
 
-You'll see the interactive CLI menu for registration, login, and chat.
+You'll see the native Fyne desktop app with authentication, friend lists, and chat.
 
 ---
 
@@ -152,6 +150,8 @@ You'll see the interactive CLI menu for registration, login, and chat.
 
 ```
 poCHATo/
+├── main.go                  # Desktop GUI entry point
+├── desktop_ui.go            # Fyne UI wiring
 ├── server/                  # Backend server
 │   ├── main.go              # Entry point & route registration
 │   ├── config.go            # Configuration management
@@ -163,18 +163,18 @@ poCHATo/
 │   ├── handlers.go          # HTTP request handlers
 │   └── errors.go            # Error definitions
 │
-├── app/                     # Client application
-│   ├── main.go              # Entry point & CLI menu
+├── app/                     # Reusable client package (auth, storage, transport)
+│   ├── main.go              # Legacy CLI helpers kept for reference
 │   ├── config.go            # Configuration management
 │   ├── models.go            # Data structures
 │   ├── api.go               # REST API client
 │   ├── websocket.go         # WebSocket client
 │   ├── encryption.go        # RSA encryption/decryption
+│   ├── service.go           # Client service layer for the GUI
 │   └── storage.go           # Local JSON-based storage
 │
 ├── go.mod                   # Go module definition
-├── go.sum                   # Dependency hashes
-├── .env.example             # Environment variables template
+go run ./server
 ├── LICENSE                  # MIT License
 └── README.md                # This file
 ```
@@ -182,25 +182,13 @@ poCHATo/
 ---
 
 ## 🔄 Data Flow
-
-### Authentication Flow
+go run .
 ```
-User Input → Validation → Password Hashing → Database Storage → Token Generation
+poCHATo desktop window
 ```
-
-### Message Flow
-```
-Plaintext → RSA Encryption → Server Storage → WebSocket Delivery → RSA Decryption → Plaintext
-```
-
+Login, register, friend management, and chat all run in the native GUI.
 ### Friend Request Flow
-```
-Send Request → Database Storage → Notification → User Acceptance → Key Exchange → Friendship
-```
-
----
-
-## 🔐 Security Features
+The client stores session and key material under the configured `DATA_DIR`.
 
 ### Encryption
 - **RSA 2048-bit** for asymmetric encryption

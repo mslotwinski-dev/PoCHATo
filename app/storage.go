@@ -97,6 +97,34 @@ func (ls *LocalStorage) LoadSession() (userID, token string, err error) {
 	return sessionData["user_id"], sessionData["token"], nil
 }
 
+// SavePreferences saves local desktop preferences.
+func (ls *LocalStorage) SavePreferences(p Preferences) error {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+
+	prefsPath := filepath.Join(ls.dataDir, "preferences.json")
+	return os.WriteFile(prefsPath, data, 0600)
+}
+
+// LoadPreferences loads local desktop preferences.
+func (ls *LocalStorage) LoadPreferences() (Preferences, error) {
+	prefsPath := filepath.Join(ls.dataDir, "preferences.json")
+
+	data, err := os.ReadFile(prefsPath)
+	if err != nil {
+		return Preferences{}, err
+	}
+
+	var prefs Preferences
+	if err := json.Unmarshal(data, &prefs); err != nil {
+		return Preferences{}, err
+	}
+
+	return prefs, nil
+}
+
 // ClearSession clears session data
 func (ls *LocalStorage) ClearSession() error {
 	sessionPath := filepath.Join(ls.dataDir, "session.json")
